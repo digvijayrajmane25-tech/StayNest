@@ -2,8 +2,6 @@ if(process.env.NODE_ENV  != "production") {
 require('dotenv').config();
 }
 
-console.log(process.env.SECRET);
-
 const express = require("express");
 const app = express();
 const mongoose = require("mongoose");
@@ -18,6 +16,8 @@ const flash= require("connect-flash");
 const passport= require("passport");
 const LocalStrategy= require("passport-local").Strategy;
 const User= require("./models/user.js"); 
+const Listing = require("./models/listing.js");
+const initData = require("./init/data.js");
 
 const listingsRouter= require("./routes/listing.js");
 const reviewsRouter = require("./routes/review.js");
@@ -25,26 +25,19 @@ const userRouter = require("./routes/user.js");
 
 
 
-const dbUrl = process.env.ATLASDB_URL;
+const dbUrl =
+    process.env.ATLASDB_URL ||
+    process.env.MONGO_URL ||
+    process.env.DATABASE_URL ||
+    process.env.MONGODB_URI;
+const PORT = process.env.PORT || 8080;
 
-if (!dbUrl) {
-    throw new Error("ATLASDB_URL is missing in .env");
-}
-
-main()
-    .then(() => {
-        console.log("connected to DB");
-        app.listen(8080, () => {
-            console.log("server is listening to port 8080");
-        });
-    })
-    .catch((err) => {
-        console.log("DB connection failed:", err.message);
-        process.exit(1);
-    });
-
-async function main() {
-    await mongoose.connect(dbUrl);
+async function ensureListingsData() {
+    const existingCount = await Listing.countDocuments({});
+    if (existingCount === 0) {
+        await Listing.insertMany(initData.data);
+        console.log("No listings found. Seeded default listings into database.");
+    }
 }
 
 app.set("view engine", "ejs");
@@ -55,14 +48,20 @@ app.use(methodOverride("_method"));
 app.engine('ejs', ejsMate);
 app.use(express.static(path.join(__dirname, "/public")));
 
+if (process.env.NODE_ENV === "production") {
+    app.set("trust proxy", 1);
+}
+
 const sessionOptions = {
-    secret: process.env.SECRET,
+    secret: process.env.SECRET || "staynest-dev-secret",
     resave: false,
-    saveUninitialized: true,
+    saveUninitialized: false,
     cookie:{
         expires: Date.now() + 7 * 24 * 60 * 60 * 1000,
         maxAge: 7 * 24 * 60 * 60 * 1000,
         httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
     },
 };
 
@@ -91,12 +90,35 @@ app.get("/terms", (req, res) => {
     res.send("Terms and conditions page coming soon.");
 });
 
+app.get("/", (req, res) => {
+    res.redirect("/listings");
+});
+
 app.use((req, res, next) =>{
     res.locals.success =req.flash("success");
     res.locals.error = req.flash("error");
     res.locals.currUser= req.user;
     next();
 });
+
+app.listen(PORT, () => {
+    console.log(`server is listening to port ${PORT}`);
+});
+
+if (!dbUrl) {
+    console.error("DB URL is missing. Set ATLASDB_URL (or MONGO_URL / DATABASE_URL / MONGODB_URI) on Render.");
+} else {
+    mongoose
+        .connect(dbUrl)
+        .then(async () => {
+            console.log("connected to DB");
+            await ensureListingsData();
+        })
+        .catch((err) => {
+            console.error("DB connection failed:", err.message);
+            console.error("App is still running, but DB-backed routes may fail until DB is reachable.");
+        });
+}
 
 app.use("/listings", listingsRouter)
 app.use("/listings/:id/reviews", reviewsRouter);

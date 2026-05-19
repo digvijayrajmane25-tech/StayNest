@@ -29,21 +29,23 @@ const listingSchema = new Schema({
         ref :  "User"
     },
     geometry: {
-         type: {
-      type: String, // Don't do `{ location: { type: String } }`
-      enum: ['Point'], // 'location.type' must be 'Point'
-      required: true
-    },
-    coordinates: {
-      type: [Number],
-      required: true
-    }
-    }
+  type: {
+    type: String,
+    enum: ["Point"],
+    default: "Point",
+    required: true
+  },
+  coordinates: {
+    type: [Number],
+    default: [77.2090, 28.6139],
+    required: true
+  }
+}
 });
 
 listingSchema.post("findOneAndDelete", async (listing) => {
     if (listing) {
-        await Review.deleteMany({ reviews: { $in: listing.reviews } });
+        await Review.deleteMany({ _id: { $in: listing.reviews } });
     }
 });
 

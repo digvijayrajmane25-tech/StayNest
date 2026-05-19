@@ -2,7 +2,7 @@ const listing = require("../models/listing");
 const mbxGeocoding = require('@mapbox/mapbox-sdk/services/geocoding');
 const mapToken = process.env.MAP_TOKEN;
 
-const geocodingClient = mbxGeocoding({ accessToken: mapToken });
+const geocodingClient = mapToken ? mbxGeocoding({ accessToken: mapToken }) : null;
 
 module.exports.index = async (req, res) => {
     const allListings = await listing.find({})
@@ -33,17 +33,23 @@ module.exports.showListing = async (req, res) => {
 
     // Backfill geometry for older listings that were created before map coordinates were stored.
     if (!singleListing.geometry || !Array.isArray(singleListing.geometry.coordinates) || singleListing.geometry.coordinates.length !== 2) {
-        const geocodeQuery = `${singleListing.location}, ${singleListing.country}`;
-        const response = await geocodingClient
-            .forwardGeocode({
-                query: geocodeQuery,
-                limit: 1,
-            })
-            .send();
+        if (geocodingClient) {
+            try {
+                const geocodeQuery = `${singleListing.location}, ${singleListing.country}`;
+                const response = await geocodingClient
+                    .forwardGeocode({
+                        query: geocodeQuery,
+                        limit: 1,
+                    })
+                    .send();
 
-        if (response.body.features.length) {
-            singleListing.geometry = response.body.features[0].geometry;
-            await singleListing.save();
+                if (response.body.features.length) {
+                    singleListing.geometry = response.body.features[0].geometry;
+                    await singleListing.save();
+                }
+            } catch (err) {
+                console.warn("Mapbox geocoding failed for listing display:", err.message);
+            }
         }
     }
 
@@ -52,22 +58,30 @@ module.exports.showListing = async (req, res) => {
 }
 
 module.exports.createListing = async (req, res, next) => {
-        const geocodeQuery = `${req.body.listing.location}, ${req.body.listing.country}`;
-        const response = await geocodingClient
-                .forwardGeocode({
-                        query: geocodeQuery,
-                        limit: 1,
-                })
-                .send();
-
     const newListing = new listing(req.body.listing);
     newListing.owner = req.user._id;
     if (req.file) {
         newListing.image = { url: req.file.path, filename: req.file.filename };
     }
-    if (response.body.features.length) {
-        newListing.geometry = response.body.features[0].geometry;
+
+    if (geocodingClient) {
+        try {
+            const geocodeQuery = `${req.body.listing.location}, ${req.body.listing.country}`;
+            const response = await geocodingClient
+                .forwardGeocode({
+                    query: geocodeQuery,
+                    limit: 1,
+                })
+                .send();
+
+            if (response.body.features.length) {
+                newListing.geometry = response.body.features[0].geometry;
+            }
+        } catch (err) {
+            console.warn("Mapbox geocoding failed while creating listing:", err.message);
+        }
     }
+
     let savedListing = await newListing.save();
     console.log(savedListing);
     req.flash("success", "New Listing Created");
@@ -99,16 +113,22 @@ module.exports.updateListing = async (req, res) => {
 
     Object.assign(updatedListing, req.body.listing);
 
-    const geocodeQuery = `${updatedListing.location}, ${updatedListing.country}`;
-    const response = await geocodingClient
-        .forwardGeocode({
-            query: geocodeQuery,
-            limit: 1,
-        })
-        .send();
+    if (geocodingClient) {
+        try {
+            const geocodeQuery = `${updatedListing.location}, ${updatedListing.country}`;
+            const response = await geocodingClient
+                .forwardGeocode({
+                    query: geocodeQuery,
+                    limit: 1,
+                })
+                .send();
 
-    if (response.body.features.length) {
-        updatedListing.geometry = response.body.features[0].geometry;
+            if (response.body.features.length) {
+                updatedListing.geometry = response.body.features[0].geometry;
+            }
+        } catch (err) {
+            console.warn("Mapbox geocoding failed while updating listing:", err.message);
+        }
     }
 
     if (req.file) {

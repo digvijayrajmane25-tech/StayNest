@@ -18,6 +18,7 @@ const LocalStrategy= require("passport-local").Strategy;
 const User= require("./models/user.js"); 
 const Listing = require("./models/listing.js");
 const initData = require("./init/data.js");
+const { requireDbConnection } = require("./middleware.js");
 
 const listingsRouter= require("./routes/listing.js");
 const reviewsRouter = require("./routes/review.js");
@@ -31,6 +32,8 @@ const dbUrl =
     process.env.DATABASE_URL ||
     process.env.MONGODB_URI;
 const PORT = process.env.PORT || 8080;
+
+mongoose.set("bufferCommands", false);
 
 async function ensureListingsData() {
     const existingCount = await Listing.countDocuments({});
@@ -105,23 +108,29 @@ app.listen(PORT, () => {
     console.log(`server is listening to port ${PORT}`);
 });
 
-if (!dbUrl) {
-    console.error("DB URL is missing. Set ATLASDB_URL (or MONGO_URL / DATABASE_URL / MONGODB_URI) on Render.");
-} else {
-    mongoose
-        .connect(dbUrl)
-        .then(async () => {
-            console.log("connected to DB");
-            await ensureListingsData();
-        })
-        .catch((err) => {
-            console.error("DB connection failed:", err.message);
-            console.error("App is still running, but DB-backed routes may fail until DB is reachable.");
+async function connectWithRetry() {
+    if (!dbUrl) {
+        console.error("DB URL is missing. Set ATLASDB_URL (or MONGO_URL / DATABASE_URL / MONGODB_URI) on Render.");
+        return;
+    }
+
+    try {
+        await mongoose.connect(dbUrl, {
+            serverSelectionTimeoutMS: 10000,
         });
+        console.log("connected to DB");
+        await ensureListingsData();
+    } catch (err) {
+        console.error("DB connection failed:", err.message);
+        console.error("Retrying DB connection in 5 seconds...");
+        setTimeout(connectWithRetry, 5000);
+    }
 }
 
-app.use("/listings", listingsRouter)
-app.use("/listings/:id/reviews", reviewsRouter);
+connectWithRetry();
+
+app.use("/listings", requireDbConnection, listingsRouter)
+app.use("/listings/:id/reviews", requireDbConnection, reviewsRouter);
 app.use("/", userRouter);
 
 app.use((req, res) => {

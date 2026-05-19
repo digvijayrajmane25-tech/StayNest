@@ -98,3 +98,17 @@ module.exports.isReviewAuthor = async (req, res, next) => {
     }
     next();
 };
+
+module.exports.requireDbConnection = (req, res, next) => {
+    if (mongoose.connection.readyState === 1) {
+        return next();
+    }
+
+    const message = "Database is temporarily unavailable. Please try again in a moment.";
+    req.flash("error", message);
+    return res.status(503).render("listings/error.ejs", {
+        err: null,
+        statusCode: 503,
+        message,
+    });
+};

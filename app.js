@@ -94,7 +94,18 @@ app.get("/terms", (req, res) => {
 });
 
 app.get("/", (req, res) => {
-    res.redirect("/listings");
+    if (mongoose.connection.readyState === 1) {
+        return res.redirect("/listings");
+    }
+
+    return res.status(200).send("StayNest server is running. Database is reconnecting; retry in a few moments.");
+});
+
+app.get("/health", (req, res) => {
+    res.status(200).json({
+        status: "ok",
+        dbReadyState: mongoose.connection.readyState,
+    });
 });
 
 app.use((req, res, next) =>{
